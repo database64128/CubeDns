@@ -98,7 +98,7 @@ namespace CubeDns
         /// </summary>
         private static byte[] HostnameToQNAME(string hostname)
         {
-            List<byte> QNAME = new List<byte>();
+            List<byte> QNAME = new List<byte>(hostname.Length + 2);
             int prevDotPos = -1, searchPosition = 0;
             searchPosition = hostname.IndexOf('.', searchPosition);
             while (searchPosition != -1)
@@ -166,8 +166,8 @@ namespace CubeDns
 
             // BEGIN Header
             // ID
-            header[0] = 0x20;
-            header[1] = 0x40;
+            header[0] = 0xFA;
+            header[1] = 0x80;
             //   0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
             // +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
             // |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
@@ -226,7 +226,7 @@ namespace CubeDns
         /// <summary>
         /// Send a DNS query via UDP
         /// </summary>
-        private static bool TryUdpQuery(byte[] query, IPAddress dns, out List<byte> response)
+        private static bool TryUdpQuery(byte[] query, IPAddress dns, out Span<byte> response)
         {
             UdpClient udpClient = new UdpClient();
             udpClient.Client.ReceiveTimeout = DnsTimeout;
@@ -237,7 +237,7 @@ namespace CubeDns
                 udpClient.Connect(dnsEndPoint);
                 udpClient.Send(query, query.Length);
                 // receive the response
-                response = new List<byte>(udpClient.Receive(ref dnsEndPoint));
+                response = new Span<byte>(udpClient.Receive(ref dnsEndPoint));
                 udpClient.Close();
                 return true;
             }
@@ -252,7 +252,7 @@ namespace CubeDns
         /// <summary>
         /// Send a DNS query via TCP
         /// </summary>
-        private static bool TryTcpQuery(byte[] query, IPAddress dns, out List<byte> response)
+        private static bool TryTcpQuery(byte[] query, IPAddress dns, out Span<byte> response)
         {
             TcpClient tcpClient = new TcpClient();
             tcpClient.Client.ReceiveTimeout = DnsTimeout;
@@ -270,7 +270,7 @@ namespace CubeDns
                 Array.Resize(ref responseBytes, bytesReceived);
                 networkStream.Close();
                 tcpClient.Close();
-                response = new List<byte>(responseBytes);
+                response = new Span<byte>(responseBytes);
                 return true;
             }
             catch (IOException e) when (e.InnerException.GetType().Name == "SocketException")
@@ -312,7 +312,7 @@ namespace CubeDns
             byte[] query,
             IPAddress dns,
             //int port,
-            out List<byte> response
+            out Span<byte> response
             )
         {
             TcpClient tcpClient = new TcpClient();
@@ -331,7 +331,7 @@ namespace CubeDns
                 // resize the array to remove empty bytes
                 Array.Resize(ref responseBytes, bytesReceived);
                 tcpClient.Close();
-                response = new List<byte>(responseBytes);
+                response = new Span<byte>(responseBytes);
                 return true;
             }
             catch (AuthenticationException e)
@@ -363,7 +363,7 @@ namespace CubeDns
         private static bool TryDoHQuery
             (
             byte[] query,
-            out List<byte> response,
+            out Span<byte> response,
             string dns = "https://cloudflare-dns.com/dns-query"
             )
         {
@@ -378,7 +378,7 @@ namespace CubeDns
             {
                 HttpResponseMessage httpResponseMessage = client.PostAsync(dns, byteArrayContent).Result;
                 Console.WriteLine($"Status Code: {httpResponseMessage.StatusCode}");
-                response = new List<byte>(httpResponseMessage.Content.ReadAsByteArrayAsync().Result);
+                response = new Span<byte>(httpResponseMessage.Content.ReadAsByteArrayAsync().Result);
                 return httpResponseMessage.IsSuccessStatusCode;
             }
             catch (AggregateException e)
@@ -399,7 +399,7 @@ namespace CubeDns
         /// Translate the NAME in a DNS response to a hostname string.
         /// Can handle extra bytes after the actual NAME.
         /// </summary>
-        private static string NAMEToHostname(List<byte> NAME, List<byte> DnsMessage, QueryTransport queryTransport)
+        private static string NAMEToHostname(ReadOnlySpan<byte> NAME, ReadOnlySpan<byte> DnsMessage, QueryTransport queryTransport)
         {
             int pos = 0;
             StringBuilder hostname = new StringBuilder(256);
@@ -408,21 +408,21 @@ namespace CubeDns
                 // if compressed
                 if (NAME[pos] >= 0xc0)
                 {
-                    // extract offset
-                    byte[] byteOffset = NAME.GetRange(pos, 2).ToArray();
+                    // extract offset into a new array
+                    var byteOffset = NAME.Slice(pos, 2).ToArray();
                     byteOffset[0] &= 0b0011_1111;
                     int offset = BinaryPrimitives.ReadUInt16BigEndian(byteOffset);
                     // recursively get hostname and append to hostname
                     if (queryTransport == QueryTransport.Tcp || queryTransport == QueryTransport.DoT)
                         offset += 2; // in a Tcp and DoT message, offset is relative to the header ID.
-                    hostname.Append(NAMEToHostname(DnsMessage.GetRange(offset, DnsMessage.Count - offset), DnsMessage, queryTransport));
+                    hostname.Append(NAMEToHostname(DnsMessage.Slice(offset, DnsMessage.Length - offset), DnsMessage, queryTransport));
                     hostname.Append('.');
                     // reached the end of NAME
                     break;
                 }
                 else
                 {
-                    hostname.Append(Encoding.ASCII.GetString(NAME.ToArray(), pos + 1, NAME[pos]));
+                    hostname.Append(Encoding.ASCII.GetString(NAME.Slice(start: pos + 1, length: NAME[pos])));
                     hostname.Append('.');
                     pos += (NAME[pos] + 1);
                 }
@@ -439,42 +439,43 @@ namespace CubeDns
         /// Translate the NAME to a string.
         /// Move forward the offset and return the string.
         /// </summary>
-        private static string HandleNAMEinMessage(List<byte> response, ref int offset, QueryTransport queryTransport)
+        private static string HandleNAMEinMessage(ReadOnlySpan<byte> response, ref int offset, QueryTransport queryTransport)
         {
             int oldOffset = offset;
-            byte[] bytesNAME;
+            ReadOnlySpan<byte> bytesNAME;
             if (response[offset] >= 0xc0) // domain name is compressed
             {
-                bytesNAME = response.GetRange(offset, 2).ToArray();
+                bytesNAME = response.Slice(offset, 2);
                 offset += 2;
             }
             else
             {
-                offset = response.IndexOf(0x00, offset);
-                bytesNAME = response.GetRange(oldOffset, offset - oldOffset + 1).ToArray();
+                // offset is relative to response
+                offset = offset + MemoryExtensions.IndexOf(response.Slice(offset), (byte)0x00);
+                bytesNAME = response.Slice(oldOffset, offset - oldOffset + 1);
                 offset++;
             }
-            return NAMEToHostname(new List<byte>(bytesNAME), response, queryTransport);
+            return NAMEToHostname(bytesNAME, response, queryTransport);
         }
 
         /// <summary>
         /// Parse an Resource Record (RR) in a message starting from an offset.
         /// Move forward the offset.
         /// </summary>
-        private static void ParseRR(List<byte> response, ref int offset, QueryTransport queryTransport)
+        private static void ParseRR(ReadOnlySpan<byte> response, ref int offset, QueryTransport queryTransport)
         {
             string NAME = HandleNAMEinMessage(response, ref offset, queryTransport);
 
-            var bytesTYPE = response.GetRange(offset, 2).ToArray();
-            var bytesCLASS = response.GetRange(offset + 2, 2).ToArray();
-            var bytesTTL = response.GetRange(offset + 4, 4).ToArray();
-            var bytesRDLENGTH = response.GetRange(offset + 8, 2).ToArray();
+            var bytesTYPE = response.Slice(offset, 2);
+            var bytesCLASS = response.Slice(offset + 2, 2);
+            var bytesTTL = response.Slice(offset + 4, 4);
+            var bytesRDLENGTH = response.Slice(offset + 8, 2);
 
             UInt16 TYPE = BinaryPrimitives.ReadUInt16BigEndian(bytesTYPE);
             UInt16 CLASS = BinaryPrimitives.ReadUInt16BigEndian(bytesCLASS);
             UInt32 TTL = BinaryPrimitives.ReadUInt32BigEndian(bytesTTL);
             UInt16 RDLENGTH = BinaryPrimitives.ReadUInt16BigEndian(bytesRDLENGTH);
-            var bytesRDATA = response.GetRange(offset + 10, RDLENGTH).ToArray();
+            var bytesRDATA = response.Slice(offset + 10, RDLENGTH);
 
             offset += 10 + RDLENGTH;
 
@@ -494,12 +495,12 @@ RDATA: ");
             }
             else if (TYPE == 12) // PTR
             {
-                string PTRDNAME = NAMEToHostname(new List<byte>(bytesRDATA), response, queryTransport);
+                string PTRDNAME = NAMEToHostname(bytesRDATA, response, queryTransport);
                 Console.WriteLine($"\t{PTRDNAME}");
             }
             else // print raw data
             {
-                string RDATA_hex = BitConverter.ToString(bytesRDATA);
+                string RDATA_hex = Encoding.ASCII.GetString(bytesRDATA);
                 Console.WriteLine($"\t{RDATA_hex}");
             }
         }
@@ -507,7 +508,7 @@ RDATA: ");
         /// <summary>
         /// Parse the response message.
         /// </summary>
-        private static void ParseResponse(List<byte> response, int queryLength, QTYPE qTYPE, QueryTransport queryTransport)
+        private static void ParseResponse(ReadOnlySpan<byte> response, int queryLength, QTYPE qTYPE, QueryTransport queryTransport)
         {
             int offset = 0,
                 tcpMsgLength = 0,
@@ -517,19 +518,19 @@ RDATA: ");
             {
                 // save TcpMsgLength and remove it
                 byte[] bytesTcpMsgLength = new byte[4];
-                Array.Copy(response.GetRange(0, 2).ToArray(), 0, bytesTcpMsgLength, 2, 2);
+                Array.Copy(response.Slice(start: 0, length: 2).ToArray(), 0, bytesTcpMsgLength, 2, 2);
                 tcpMsgLength = BinaryPrimitives.ReadInt32BigEndian(bytesTcpMsgLength);
                 offset = 2;
             }
 
             // read header
-            var bytesID = response.GetRange(offset, 2).ToArray();
-            var bytesHeaderStuff = response.GetRange(offset + 2, 2).ToArray();
+            var bytesID = response.Slice(start: offset, length: 2);
+            var bytesHeaderStuff = response.Slice(start: offset + 2, length: 2);
 
-            var bytesQDCOUNT = response.GetRange(offset + 4, 2).ToArray();
-            var bytesANCOUNT = response.GetRange(offset + 6, 2).ToArray();
-            var bytesNSCOUNT = response.GetRange(offset + 8, 2).ToArray();
-            var bytesARCOUNT = response.GetRange(offset + 10, 2).ToArray();
+            var bytesQDCOUNT = response.Slice(start: offset + 4, length: 2);
+            var bytesANCOUNT = response.Slice(start: offset + 6, length: 2);
+            var bytesNSCOUNT = response.Slice(start: offset + 8, length: 2);
+            var bytesARCOUNT = response.Slice(start: offset + 10, length: 2);
 
             // parse header
             int QR = (bytesHeaderStuff[0] & 0b1000_0000) >> 7;
@@ -563,25 +564,26 @@ RDATA: ");
             // length of QNAME is unknown
             // look for 0x00
             questionOffset = offset + 12;
-            offset = response.IndexOf(0x00, questionOffset);
+            // offset is relative to response
+            offset = questionOffset + MemoryExtensions.IndexOf(response.Slice(questionOffset), (byte)0x00);
             if (offset == -1)
             {
                 Console.WriteLine("Error parsing response: invalid QNAME.");
                 return;
             }
-            var bytesQNAME = response.GetRange(questionOffset, offset - questionOffset + 1).ToArray();
-            var bytesQTYPE = response.GetRange(offset + 1, 2).ToArray();
-            var bytesQCLASS = response.GetRange(offset + 3, 2).ToArray();
+            var bytesQNAME = response.Slice(start: questionOffset, length: offset - questionOffset + 1);
+            var bytesQTYPE = response.Slice(start: offset + 1, length: 2);
+            var bytesQCLASS = response.Slice(start: offset + 3, length: 2);
             // parse question
-            string QNAME = NAMEToHostname(new List<byte>(bytesQNAME), response, queryTransport);
+            string QNAME = NAMEToHostname(bytesQNAME, response, queryTransport);
             UInt16 QTYPE = BinaryPrimitives.ReadUInt16BigEndian(bytesQTYPE);
             UInt16 QCLASS = BinaryPrimitives.ReadUInt16BigEndian(bytesQCLASS);
 
             // print info
-            Console.WriteLine($@"Received bytes: {response.Count}
+            Console.WriteLine($@"Received bytes: {response.Length}
 
 ####### HEADER #######
-ID: {BitConverter.ToString(bytesID)}
+ID: {BinaryPrimitives.ReadUInt16BigEndian(bytesID)}
 QR: {QR}
 OPCODE: {OPCODE}
 AA: {AA}
@@ -617,66 +619,6 @@ QCLASS: {QCLASS}");
                 Console.WriteLine($"\n####### ADDITIONAL #{i} #######");
                 ParseRR(response, ref offset, queryTransport);
             }
-            // old code ↓
-            /*answerOffset = offset;
-            // answer
-            for (int i = 0; i < ANCOUNT; i++)
-            {
-                offset = response.IndexOf(0x00, answerOffset);
-                if (offset == -1)
-                {
-                    Console.WriteLine("Error parsing response: invalid NAME.");
-                    break;
-                }
-                byte[] bytesNAME = response.GetRange(answerOffset, offset - answerOffset + 1).ToArray();
-                // ↑ yes, I know it reads one extra byte (0x00) when NAME is compressed.
-                // it's fine because NAMEToHostname was designed to handle such situation
-                // and that's why the offset increments only when NAME is not compressed.
-                if (response[answerOffset] < 0xc0) // NAME is not compressed. Currently at 0x00
-                    offset++; // move forward from 0x00
-
-                var bytesTYPE = response.GetRange(offset, 2).ToArray();
-                var bytesCLASS = response.GetRange(offset + 2, 2).ToArray();
-                var bytesTTL = response.GetRange(offset + 4, 4).ToArray();
-                var bytesRDLENGTH = response.GetRange(offset + 8, 2).ToArray();
-
-                string NAME = NAMEToHostname(new List<byte>(bytesNAME), response, queryTransport);
-                UInt16 TYPE = BinaryPrimitives.ReadUInt16BigEndian(bytesTYPE);
-                UInt16 CLASS = BinaryPrimitives.ReadUInt16BigEndian(bytesCLASS);
-                UInt32 TTL = BinaryPrimitives.ReadUInt32BigEndian(bytesTTL);
-                UInt16 RDLENGTH = BinaryPrimitives.ReadUInt16BigEndian(bytesRDLENGTH);
-                var bytesRDATA = response.GetRange(offset + 10, RDLENGTH).ToArray();
-
-                offset += 10 + RDLENGTH;
-
-                // print info
-                Console.WriteLine($@"
-####### ANSWER #{i} #######
-NAME: {NAME}
-TYPE: {TYPE}
-CLASS: {CLASS}
-TTL: {TTL}
-RDLENGTH: {RDLENGTH}
-Content: ");
-            
-
-                
-                if (TYPE == 1 || TYPE == 28) // IPv4 & IPv6
-                {
-                    IPAddress address = new IPAddress(bytesRDATA);
-                    Console.WriteLine($"\t{address}");
-                }
-                else if (TYPE == 12) // PTR
-                {
-                    string PTRDNAME = NAMEToHostname(new List<byte>(bytesRDATA), response, queryTransport);
-                    Console.WriteLine($"\t{PTRDNAME}");
-                }
-                else // print raw data
-                {
-                    string RDATA_hex = BitConverter.ToString(bytesRDATA);
-                    Console.WriteLine($"\t{RDATA_hex}");
-                }
-            }*/
         }
 
         /// <summary>
@@ -713,7 +655,7 @@ Content: ");
             byte[] query = MakeQueryDatagram(QNAME, qTYPE, queryTransport);
             if (queryTransport == QueryTransport.Udp)
             {
-                if (TryUdpQuery(query, dns, out List<byte> response))
+                if (TryUdpQuery(query, dns, out Span<byte> response))
                 {
                     ParseResponse(response, query.Length, qTYPE, queryTransport);
                 }
@@ -727,7 +669,7 @@ Content: ");
             }
             if (queryTransport == QueryTransport.Tcp)
             {
-                if (TryTcpQuery(query, dns, out List<byte> response))
+                if (TryTcpQuery(query, dns, out Span<byte> response))
                 {
                     ParseResponse(response, query.Length, qTYPE, queryTransport);
                 }
@@ -741,7 +683,7 @@ Content: ");
             }
             if (queryTransport == QueryTransport.DoT)
             {
-                if (TryDoTQuery(query, dns, out List<byte> response))
+                if (TryDoTQuery(query, dns, out Span<byte> response))
                 {
                     ParseResponse(response, query.Length, qTYPE, queryTransport);
                 }
@@ -752,7 +694,7 @@ Content: ");
             }
             if (queryTransport == QueryTransport.DoH)
             {
-                if (TryDoHQuery(query, out List<byte> response, DoHURI))
+                if (TryDoHQuery(query, out Span<byte> response, DoHURI))
                 {
                     ParseResponse(response, query.Length, qTYPE, queryTransport);
                 }

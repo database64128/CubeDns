@@ -5,7 +5,7 @@ A small DNS Resolver in C#.
 ## Usage
 
 ```bash
-CubeDns [options] {Hostname} [arguments]
+cubedns [options] {Hostname} [arguments]
 
 Options:
 
@@ -38,16 +38,17 @@ Arguments:
     [DNSSEC]: DO bit - DNSSEC data (either boolean or numeric value).
 
 Examples:
-    CubeDns --os-resolver google.com
-    CubeDns --cube-resolver google.com
-    CubeDns --cube-resolver google.com 1.1.1.1
-    CubeDns --cube-resolver google.com 1.1.1.1 AAAA
-    CubeDns --cube-resolver google.com 1.1.1.1 AAAA DoT
-    CubeDns --cube-resolver google.com https://cloudflare-dns.com/dns-query AAAA DoH
-    CubeDns --dns-over-https google.com 
-    CubeDns --dns-over-https google.com https://cloudflare-dns.com/dns-query
-    CubeDns --dns-over-https google.com https://cloudflare-dns.com/dns-query AAAA
-    CubeDns --dns-over-https google.com https://cloudflare-dns.com/dns-query AAAA true
+
+    cubedns --os-resolver google.com
+    cubedns --cube-resolver google.com
+    cubedns --cube-resolver google.com 1.1.1.1
+    cubedns --cube-resolver google.com 1.1.1.1 AAAA
+    cubedns --cube-resolver google.com 1.1.1.1 AAAA DoT
+    cubedns --cube-resolver google.com https://cloudflare-dns.com/dns-query AAAA DoH
+    cubedns --dns-over-https google.com 
+    cubedns --dns-over-https google.com https://cloudflare-dns.com/dns-query
+    cubedns --dns-over-https google.com https://cloudflare-dns.com/dns-query AAAA
+    cubedns --dns-over-https google.com https://cloudflare-dns.com/dns-query AAAA true
 ```
 
 ## Goals
@@ -59,6 +60,7 @@ Examples:
 
 - [x] [RFC 1034](https://tools.ietf.org/html/rfc1034): Base DNS concepts.
 - [x] [RFC 1035](https://tools.ietf.org/html/rfc1035): Base DNS specification.
+- [ ] [RFC 2782](https://tools.ietf.org/html/rfc2782): DNS SRV Service Location.
 - [x] [RFC 3596](https://tools.ietf.org/html/rfc3596): DNS IPv6 extension.
 - [x] [RFC 7858](https://tools.ietf.org/html/rfc7858): DNS over TLS specification.
 - [x] [RFC 8484](https://tools.ietf.org/html/rfc8484): DNS over HTTPS specification.
