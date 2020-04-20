@@ -15,6 +15,9 @@ using System.Threading.Tasks;
 
 namespace CubeDns
 {
+    /// <summary>
+    ///  DNSoverHTTPS JSON response class.
+    /// </summary>
     public class DoHResponse
     {
         public int Status { get; set; }
@@ -27,12 +30,18 @@ namespace CubeDns
         public DoHAnswer[] Answer { get; set; }
     }
 
+    /// <summary>
+    ///  DNSoverHTTPS JSON question class.
+    /// </summary>
     public class DoHQuestion
     {
         public string name { get; set; }
         public int type { get; set; }
     }
 
+    /// <summary>
+    ///  DNSoverHTTPS JSON answer class.
+    /// </summary>
     public class DoHAnswer
     {
         public string name { get; set; }
@@ -41,6 +50,9 @@ namespace CubeDns
         public string data { get; set; }
     }
 
+    /// <summary>
+    ///  Provides DNS resolver functions.
+    /// </summary>
     public static class DnsResolvers
     {
         public static int DnsTimeout { get; set; } = 5000;
@@ -60,8 +72,11 @@ namespace CubeDns
             SRV = 33
         }
 
+        static Random rnd = new Random();
+        //static byte[] queryID = new byte[2];
+
         /// <summary>
-        /// Use host OS's APIs to resolve a hostname (Dns.GetHostAddress()) or an IP address(Dns.GetHostEntry()).
+        ///  Uses host OS's APIs to resolve a hostname (Dns.GetHostAddress()) or an IP address(Dns.GetHostEntry()).
         /// </summary>
         public static (string hostname, IPAddress[] ips, QTYPE qTYPE) OSResolver(string name)
         {
@@ -94,7 +109,7 @@ namespace CubeDns
         }
 
         /// <summary>
-        /// Translate a hostname string to QNAME in a DNS query
+        ///  Translates a hostname string to QNAME in a DNS query.
         /// </summary>
         private static byte[] HostnameToQNAME(string hostname)
         {
@@ -122,7 +137,7 @@ namespace CubeDns
         }
 
         /// <summary>
-        /// Translate an IPv4 address to QNAME for a rDNS/PTR query
+        ///  Translates an IPv4 address to QNAME for a rDNS/PTR query.
         /// </summary>
         private static byte[] IPv4ToQNAME(IPAddress ipv4)
         {
@@ -139,7 +154,7 @@ namespace CubeDns
         }
 
         /// <summary>
-        /// Translate an IPv6 address to QNAME for a rDNS/PTR query
+        ///  Translates an IPv6 address to QNAME for a rDNS/PTR query.
         /// </summary>
         private static byte[] IPv6ToQNAME(IPAddress ipv6)
         {
@@ -156,18 +171,20 @@ namespace CubeDns
         }
 
         /// <summary>
-        /// Make a query datagram containing a header and a question. Return a byte array.
+        ///  Makes a query datagram containing a header and a question.
+        ///  Returns a byte array.
         /// </summary>
         private static byte[] MakeQueryDatagram(byte[] QNAME, QTYPE qTYPE, QueryTransport queryTransport)
         {
             byte[] query;
             byte[] header = new byte[12];
-            byte[] question;
+            Span<byte> headerSpan = new Span<byte>(header);
+            byte[] question = new byte[QNAME.Length + 4];
 
             // BEGIN Header
             // ID
-            header[0] = 0xFA;
-            header[1] = 0x80;
+            // generate random ID
+            rnd.NextBytes(headerSpan.Slice(start: 0, length: 2));
             //   0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
             // +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
             // |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
@@ -190,7 +207,6 @@ namespace CubeDns
             // END Header
 
             // BEGIN Question
-            question = new byte[QNAME.Length + 4];
             Array.Copy(QNAME, question, QNAME.Length);
             // QTYPE
             byte[] qTYPE4Bytes = new byte[4];
@@ -224,7 +240,7 @@ namespace CubeDns
         }
 
         /// <summary>
-        /// Send a DNS query via UDP
+        ///  Sends a DNS query via UDP.
         /// </summary>
         private static bool TryUdpQuery(byte[] query, IPAddress dns, out Span<byte> response)
         {
@@ -250,7 +266,7 @@ namespace CubeDns
         }
 
         /// <summary>
-        /// Send a DNS query via TCP
+        ///  Sends a DNS query via TCP.
         /// </summary>
         private static bool TryTcpQuery(byte[] query, IPAddress dns, out Span<byte> response)
         {
@@ -305,7 +321,7 @@ namespace CubeDns
         }
 
         /// <summary>
-        /// Send a DNS query via DNS over TLS
+        ///  Sends a DNS query via DNS over TLS.
         /// </summary>
         private static bool TryDoTQuery
             (
@@ -358,7 +374,7 @@ namespace CubeDns
         }
 
         /// <summary>
-        /// Send a DNS query via DNS over HTTPS
+        ///  Sends a DNS query via DNS over HTTPS.
         /// </summary>
         private static bool TryDoHQuery
             (
@@ -396,8 +412,8 @@ namespace CubeDns
         }
 
         /// <summary>
-        /// Translate the NAME in a DNS response to a hostname string.
-        /// Can handle extra bytes after the actual NAME.
+        ///  Translates the NAME in a DNS response to a hostname string.
+        ///  Can handle extra bytes after the actual NAME.
         /// </summary>
         private static string NAMEToHostname(ReadOnlySpan<byte> NAME, ReadOnlySpan<byte> DnsMessage, QueryTransport queryTransport)
         {
@@ -434,10 +450,10 @@ namespace CubeDns
         }
 
         /// <summary>
-        /// Find the NAME in a message starting from an offset.
-        /// Precisely extract the NAME.
-        /// Translate the NAME to a string.
-        /// Move forward the offset and return the string.
+        ///  Finds the NAME in a message starting from an offset.
+        ///  Precisely extracts the NAME.
+        ///  Translates the NAME to a string.
+        ///  Moves forward the offset and returns the string.
         /// </summary>
         private static string HandleNAMEinMessage(ReadOnlySpan<byte> response, ref int offset, QueryTransport queryTransport)
         {
@@ -459,8 +475,8 @@ namespace CubeDns
         }
 
         /// <summary>
-        /// Parse an Resource Record (RR) in a message starting from an offset.
-        /// Move forward the offset.
+        ///  Parses an Resource Record (RR) in a message starting from an offset.
+        ///  Moves forward the offset.
         /// </summary>
         private static void ParseRR(ReadOnlySpan<byte> response, ref int offset, QueryTransport queryTransport)
         {
@@ -488,25 +504,25 @@ TTL: {TTL}
 RDLENGTH: {RDLENGTH}
 RDATA: ");
             // parse RDATA based on TYPE
-            if (TYPE == 1 || TYPE == 28) // IPv4 & IPv6
+            if (TYPE == 1 || TYPE == 28) // IPv4 or IPv6
             {
                 IPAddress address = new IPAddress(bytesRDATA);
                 Console.WriteLine($"\t{address}");
             }
-            else if (TYPE == 12) // PTR
+            else if (TYPE == 2 || TYPE == 12) // NS or PTR
             {
                 string PTRDNAME = NAMEToHostname(bytesRDATA, response, queryTransport);
                 Console.WriteLine($"\t{PTRDNAME}");
             }
             else // print raw data
             {
-                string RDATA_hex = Encoding.ASCII.GetString(bytesRDATA);
+                string RDATA_hex = BitConverter.ToString(bytesRDATA.ToArray());
                 Console.WriteLine($"\t{RDATA_hex}");
             }
         }
 
         /// <summary>
-        /// Parse the response message.
+        ///  Parses the response message.
         /// </summary>
         private static void ParseResponse(ReadOnlySpan<byte> response, int queryLength, QTYPE qTYPE, QueryTransport queryTransport)
         {
@@ -549,7 +565,7 @@ RDATA: ");
 
             // checks
 
-            if (bytesID[0] != 0x20
+            /*if (bytesID[0] != 0x20
                 || bytesID[1] != 0x40
                 || QR != 1
                 || OPCODE != 0
@@ -558,7 +574,7 @@ RDATA: ");
                 || QDCOUNT != 1)
             {
                 Console.WriteLine($"Warning: header checks failed.");
-            }
+            }*/
 
             // read question
             // length of QNAME is unknown
@@ -622,7 +638,7 @@ QCLASS: {QCLASS}");
         }
 
         /// <summary>
-        /// The resolver public interface.
+        ///  The resolver public interface.
         /// </summary>
         public static void CubeResolver
             (
@@ -706,9 +722,11 @@ QCLASS: {QCLASS}");
         }
 
         /// <summary>
-        /// DNS over HTTPS using JSON format.
+        ///  DNS over HTTPS using JSON format.
+        ///  Returns HTTPS response body and parsed Json class.
+        ///  Throws HttpRequestException.
         /// </summary>
-        public static void DoHJson
+        public static (string responseBody, DoHResponse doHResponse) DoHJson
             (
             string name,
             string dns = "https://cloudflare-dns.com/dns-query",
@@ -729,20 +747,10 @@ QCLASS: {QCLASS}");
             client.DefaultRequestHeaders.Add("Accept", "application/dns-json");
             client.DefaultRequestVersion = HttpVersion.Version20;
 
-            try
-            {
-                string responseBody = client.GetStringAsync(queryURI.ToString()).Result;
-                DoHResponse doHResponse = JsonSerializer.Deserialize<DoHResponse>(responseBody);
-                Console.WriteLine($"####### Response JSON #######\n{responseBody}\n");
-                foreach (DoHAnswer doHAnswer in doHResponse.Answer)
-                {
-                    Console.WriteLine($"####### Parsed Response #######\n{doHAnswer.data}\n");
-                }
-            }
-            catch (HttpRequestException e)
-            {
-                Console.WriteLine($"{e}");
-            }
+            string responseBody = client.GetStringAsync(queryURI.ToString()).Result;
+            DoHResponse doHResponse = JsonSerializer.Deserialize<DoHResponse>(responseBody);
+
+            return (responseBody, doHResponse);
         }
     }
 }

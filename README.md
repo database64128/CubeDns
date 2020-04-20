@@ -15,7 +15,7 @@ Options:
     --cube-resolver {Hostname} [DNS Server] [QTYPE] [QueryTransport]
         My DNS Resolver implementation.
 
-    --dns-over-https {Hostname} [DNS Server] [QTYPE] [DNSSEC]
+    --doh-json {Hostname} [DNS Server] [QTYPE] [DNSSEC]
         An implementation of Cloudflare DoH Json format.
 
 Arguments:
@@ -45,10 +45,10 @@ Examples:
     cubedns --cube-resolver google.com 1.1.1.1 AAAA
     cubedns --cube-resolver google.com 1.1.1.1 AAAA DoT
     cubedns --cube-resolver google.com https://cloudflare-dns.com/dns-query AAAA DoH
-    cubedns --dns-over-https google.com 
-    cubedns --dns-over-https google.com https://cloudflare-dns.com/dns-query
-    cubedns --dns-over-https google.com https://cloudflare-dns.com/dns-query AAAA
-    cubedns --dns-over-https google.com https://cloudflare-dns.com/dns-query AAAA true
+    cubedns --doh-json google.com 
+    cubedns --doh-json google.com https://cloudflare-dns.com/dns-query
+    cubedns --doh-json google.com https://cloudflare-dns.com/dns-query AAAA
+    cubedns --doh-json google.com https://cloudflare-dns.com/dns-query AAAA true
 ```
 
 ## Goals
